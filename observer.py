@@ -54,8 +54,7 @@ class FileChangeHandler(FileSystemEventHandler):
             with open(event.src_path, 'r') as file:
                 lines = file.readlines()
                 with self.observer.lock:
-                    # self.observer.datas[base_src_path].clear()
                     for line in lines:
                         x, y = map(float, line.strip().split(' '))
                         self.observer.datas[base_src_path].append((x, y))
-                        print(f"observer: {x}, {y} for {base_src_path}")
+                        logger.info(f"observer: {x}, {y} for {base_src_path}")

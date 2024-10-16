@@ -1,11 +1,14 @@
 import os
-from watchdog.observers import Observer
 from producer import DataProducer
 from observer import DataObserver, FileChangeHandler
 import multiprocessing
 
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
+import dash
+from dash import dcc, html
+from dash.dependencies import Input, Output
+import numpy as np
+import pandas as pd
+import plotly.express as px
 
 file_list = ['./test1.txt', './test2.txt', './test3.txt', './test4.txt']
 producers = [
@@ -42,47 +45,56 @@ producers = [
 data_observer = DataObserver(file_list)
 handler = FileChangeHandler(data_observer)
 
-fig, ax = plt.subplots()
-lines = [ax.plot([], [], label=f'{file_path}')[0] for file_path in file_list]
-ax.set_xlim(0, 10)
-ax.set_ylim(0, 10)
-ax.legend()
+app = dash.Dash(__name__)
 
-def update_plot(frame, lines, data_lists, lock):
-    with lock:
-        for i, line in enumerate(lines):
-            base_path = os.path.basename(file_list[i])
-            data = data_lists[base_path]
+# 初始化4个数据框
+num_lines = 4
+df_list = [pd.DataFrame(columns=['X', 'Y']) for _ in range(num_lines)]
 
-            x_datas = [x for x, _ in data]
-            y_datas = [y for _, y in data]
+app.layout = html.Div([
+    dcc.Graph(id='live-graph'),
+    dcc.Interval(id='interval-component', interval=1000)  # 每秒更新
+])
 
-            print(f"update_plot: {base_path}: {x_datas} & {y_datas}")
+@app.callback(Output('live-graph', 'figure'),
+              Input('interval-component', 'n_intervals'))
+def update_graph(n):
+    global df_list
+    for i in range(num_lines):
+        base_path = os.path.basename(file_list[i])
+        with data_observer.lock:
+            data = data_observer.datas[base_path]
+            print(f"########### update {data}")
+            # 生成随机时间和数据
+            new_row = pd.DataFrame([[x, y] for x, y in data], columns=['X', 'Y'])
+            data_observer.datas[base_path].clear()
 
-            line.set_xdata(x_datas)
-            line.set_ydata(y_datas)
-    return lines
+        # 将新行添加到相应的 DataFrame
+        df_list[i] = pd.concat([df_list[i], new_row], ignore_index=True)
+
+        # 按 Time 进行排序
+        df_list[i] = df_list[i].sort_values(by='X').reset_index(drop=True)
+
+    # 创建图表，合并三个 DataFrame 以便于绘图
+    fig = px.line(pd.concat([df.assign(Line=f'Value_{i}') for i, df in enumerate(df_list)]), 
+                           x='X', 
+                           y='Y', 
+                           color='Line',
+                           title='Dynamic Data Visualization with Multiple Lines')
+    return fig
 
 if __name__ == '__main__':
-    processes = []
-    for producer in producers:
-        process = multiprocessing.Process(target=producer.product)
-        processes.append(process)
-        process.start()
-    
-    data_observer.start(handler=handler)
-    
-    ani = animation.FuncAnimation(
-        fig,
-        update_plot,
-        fargs=(lines, data_observer.datas, data_observer.lock),
-        interval=1000,
-        blit=True
-    )
-    
-    plt.show()
-
-    for process in processes:
-        process.join()
-    
-    data_observer.stop()
+    try:
+        processes = []
+        for producer in producers:
+            process = multiprocessing.Process(target=producer.product)
+            processes.append(process)
+            process.start()
+        
+        data_observer.start(handler=handler)
+        app.run_server(debug=True)
+    except Exception:
+        for process in processes:
+            process.join()
+        
+        data_observer.stop()
