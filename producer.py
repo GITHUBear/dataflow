@@ -26,10 +26,12 @@ class DataProducer:
         self.delta_interval = delta_interval
     
     def product(self):
+        print(f"process-{self.name}: begin product {self.data}")
         for (x, y) in self.data:
             delta = random.randint(-self.delta_interval, self.delta_interval)
             time.sleep((self.miu_interval + delta) / 1000.0)
-            with open(self.file, 'w') as file:
-                file.write(f"{x} {y}\n")
-            print(f"process-{self.name}: write ({x}, {y}) to {self.file}")
-                
+            print(f"process-{self.name}: [start] write ({x}, {y}) to {self.file}")
+            with FileLock(f"{self.file}.lock"):
+                with open(self.file, 'a') as file:
+                    file.write(f"{x} {y}\n")
+            print(f"process-{self.name}: [finish] write ({x}, {y}) to {self.file}")

@@ -4,8 +4,7 @@ import threading
 from typing import List
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
+from filelock import FileLock
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -22,8 +21,17 @@ class DataObserver:
         }
         self.observer = Observer()
         self.lock = threading.Lock()
+        self.file_locks = {
+            os.path.basename(file): f"{file}.lock"
+            for file in self.files
+        }
+        self.line_offsets = {
+            os.path.basename(file): 0
+            for file in self.files
+        }
 
     def start(self, handler: "FileChangeHandler"):
+        print("DataObServer start")
         for file in self.files:
             self.observer.schedule(
                 handler,
@@ -51,10 +59,16 @@ class FileChangeHandler(FileSystemEventHandler):
     def on_modified(self, event):
         base_src_path = os.path.basename(event.src_path)
         if base_src_path in self.basenames:
-            with open(event.src_path, 'r') as file:
-                lines = file.readlines()
-                with self.observer.lock:
-                    for line in lines:
-                        x, y = map(float, line.strip().split(' '))
-                        self.observer.datas[base_src_path].append((x, y))
-                        logger.info(f"observer: {x}, {y} for {base_src_path}")
+            with FileLock(self.observer.file_locks[base_src_path]):
+                with open(event.src_path, 'r') as file:
+                    cur_line_offset = 0
+                    for line in file:
+                        if self.observer.line_offsets[base_src_path] > cur_line_offset:
+                            cur_line_offset += 1
+                            continue
+                        with self.observer.lock:
+                            x, y = map(float, line.strip().split(' '))
+                            self.observer.datas[base_src_path].append((x, y))
+                            print(f"observer: {base_src_path}: {self.observer.datas[base_src_path]}")
+                        cur_line_offset += 1
+                    self.observer.line_offsets[base_src_path] = cur_line_offset
